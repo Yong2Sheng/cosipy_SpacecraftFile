@@ -15,5 +15,7 @@ from .spacecraftfile import SpacecraftFile
 
 from .ts_map import FastTSMap
 
+from .source_injector import SourceInjector
+
 #from .coordinates import attitude
 #from .coordinates import spacecraft_frame
