@@ -100,6 +100,11 @@ class SourceInjector():
             The path to save the injected data to a `.h5` file. This should include the file name. (the default is `None`, which means the injected data won't be saved.
         project_axes : list, optional
             The axes to project before saving the data file (the default is `None`, which means the data won't be projected).
+            
+        Returns
+        -------
+        histpy.Histogram
+            The `Histogram object of the injected spectrum.`
         """
         
         
@@ -140,7 +145,7 @@ class SourceInjector():
         if data_save_path is not None:
             injected.write(data_save_path)
 
-        return
+        return injected
 
         
 
