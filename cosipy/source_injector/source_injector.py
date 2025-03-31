@@ -24,8 +24,13 @@ class SourceInjector():
         """
 
         self.response_path =  response_path
-        
-        self.response_frame = response_frame
+
+        if response_frame == "spacecraftframe" or response_frame == "galactic":
+
+            self.response_frame = response_frame
+
+        else:
+            raise ValueError("The response frame can only be `spacecraftframe` or `galactic`!")
 
 
 
