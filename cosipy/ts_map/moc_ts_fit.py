@@ -99,7 +99,8 @@ class MOCTSMap(FastTSMap):
                                        np.repeat(new_data[idx], stop_nest-start_nest), 
                                        new_data[idx + 1:]))
 
-        m_new = HealpixMap(data = new_data, uniq = new_uniq)
+        #m_new = HealpixMap(data = new_data, uniq = new_uniq)
+        m_new = HealpixMap(data = new_data, uniq = new_uniq, scheme = "NUNIQ", coordsys = "G")
 
         return m_new, np.array(uniq_child_all)
     
@@ -146,6 +147,36 @@ class MOCTSMap(FastTSMap):
         """
         
         return [np.where(m.uniq == i)[0][0] for i in uniq]
+    
+    @staticmethod
+    def find_mocpix_neighbours(m, pixidx):
+        
+        """
+        Retun the pixel indicex of the neighbours for a pixel in moc map.
+        
+        Parameters
+        ----------
+        m : mhealpy.containers.healpix_map.HealpixMap
+            The map used.
+        pixidx: int
+            The pixel index you want find the neighbours
+        
+        Returns
+        -------
+        np.ndarray
+            The numpy array of the pixel indice of the neighbouring pixels
+        """
+        
+        # find the skycoord of the input pixel
+        pix_skycoord = m.pix2skycoord(pixidx)
+        
+        neighbour_pix = np.unique(m.get_all_neighbours(pix_skycoord, lonlat = True))  # use unique to remove repeats
+        neighbour_pix = neighbour_pix[neighbour_pix != -1]  # remove -1 that represents the neighbouring pixels that don't exit.
+        
+        
+        return neighbour_pix
+        
+        
 
     def fill_up_moc_map(pixidx, m, results):
 
@@ -182,7 +213,7 @@ class MOCTSMap(FastTSMap):
         return m
 
     
-    def moc_ts_fit(self, max_moc_order, top_number, energy_channel, spectrum, start_method = "fork", cpu_cores = None):
+    def moc_ts_fit(self, max_moc_order, threshold_deltaTS, energy_channel, spectrum, start_method = "fork", cpu_cores = None):
         
         """
         Fit the MOC map.
@@ -191,8 +222,8 @@ class MOCTSMap(FastTSMap):
         ----------
         max_moc_order : int
             The order of the MOC map to stop the fitting.
-        top_number : int
-            The pixels with the top likelihood to will be upscaled. For example, pixels with top eight likelihoods will be considered as mother pixels to be split into the child pixels.
+        threshold_deltaTS : float
+            The pixels with TS valunes between [maxTS - threshold_deltaTS, maxTS] will be upscaled. For example, pixels with top eight likelihoods will be considered as mother pixels to be split into the child pixels.
         energy_channel : list
             The energy channel to be used for the MOC map fitting.
         spectrum : 
@@ -208,7 +239,7 @@ class MOCTSMap(FastTSMap):
         
         # initialize the 0th order moc map, which is equlivent to a 0th order single resolution map
         uniq = nest2uniq(1, np.arange(12))
-        moc_map_ts = HealpixMap(data = np.repeat(0, 12), uniq = uniq)
+        moc_map_ts = HealpixMap(data = np.repeat(0., 12), uniq = uniq, scheme = "NUNIQ", coordsys = "G")
         
         # make the 0th order fit over all pixels
         hypothesis_coords = MOCTSMap.uniq2skycoord(moc_map_ts.uniq)
@@ -228,6 +259,18 @@ class MOCTSMap(FastTSMap):
         self.all_maps = []
         self.all_maps += [moc_map_ts]
         
+        # initialize threshold_deltaTS
+        if isinstance(threshold_deltaTS, float):
+            threshold_deltaTS = np.repeat(threshold_deltaTS, max_moc_order)
+        
+        elif isinstance(threshold_deltaTS, (list, np.ndarray)):
+            
+            threshold_deltaTS = np.array(threshold_deltaTS)
+            
+            n = threshold_deltaTS.size # the number of thresholds the user inputs: array([4.1, 4.2, 4.4, 5])
+            
+            threshold_deltaTS = np.append(threshold_deltaTS, [threshold_deltaTS[-1]] * (max_moc_order-n))  # extend the array to: array([4.1, 4.2, 4.4, 5. , 5. , 5. , 5. , 5. ])
+            
         
         # # if the user requires higher order fit
         # threshold = moc_map_ts[:].max() - MOCTSMap.get_chi_critical_value(split_containment)  # the threshold value to decide the mother pixels to be split
@@ -239,12 +282,23 @@ class MOCTSMap(FastTSMap):
             
             # decide the mother pixels to divide
             # threshold = moc_map_ts[:].max() - MOCTSMap.get_chi_critical_value(split_containment)
-            top_number_arg_array = np.argpartition(moc_map_ts, -top_number)[-top_number:]
-            print(f"The top {top_number} ts values are: {top_number_arg_array} in the last iteration, splitting these pixels...")
-            threshold = min(moc_map_ts[top_number_arg_array])
+            #top_number_arg_array = np.argpartition(moc_map_ts, -top_number)[-top_number:]
+            #print(f"The top {top_number} ts values are: {top_number_arg_array} in the last iteration, splitting these pixels...")
+            #threshold = min(moc_map_ts[top_number_arg_array])
             
-            mother_idx = np.where(moc_map_ts[:] >= threshold)[0]
-            mother_uniq = moc_map_ts.uniq[mother_idx]
+            mother_pixidx = np.where(moc_map_ts[:] >= moc_map_ts[:].max() - threshold_deltaTS[order-1])[0]
+            
+            # Detect if neghbouring pixels around the pixel
+            peak_pixidx = np.where(moc_map_ts[:] == moc_map_ts[:].max())[0][0]
+            neighbour_pix = MOCTSMap.find_mocpix_neighbours(moc_map_ts, peak_pixidx)
+            
+            # add the neighbouring pixels
+            mother_pixidx = np.union1d(mother_pixidx, neighbour_pix)
+            
+            # we need to include the nearest pixels of the peak TS pixel
+            # If they are not included, the source image might not be complete if it lies near the pixelation edge.
+            
+            mother_uniq = moc_map_ts.uniq[mother_pixidx]
             
             # upscale the resolution of the mother pixels by 1 order, now the moc map is updated
             moc_map_ts, child_uniq = MOCTSMap.upscale_moc_map(moc_map_ts, uniq_mother = mother_uniq, new_order = order)
